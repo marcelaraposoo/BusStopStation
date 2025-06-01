@@ -21,6 +21,8 @@ public class BusStopSimulator {
     private boolean paused = false;
 
     private final List<Bus> busList = new ArrayList<>();
+    private final List<Person> personList = new ArrayList<>(); // Lista de pessoas
+    private final List<Person> waitingQueue = new ArrayList<>();
     private final Lock lock = new ReentrantLock();
     private final Condition simulationCondition = lock.newCondition();
     private final Semaphore busCreationSemaphore = new Semaphore(1);
@@ -37,6 +39,7 @@ public class BusStopSimulator {
         window.setEnabledPlayButton(false);
         window.setEnabledStopButton(true);
         startSimulation();
+        startPersonCreation();
     };
 
     // Listener para o botão de stop: interrompe a criação de novos ônibus, mas não afeta os que estão na tela
@@ -53,9 +56,9 @@ public class BusStopSimulator {
 
     public BusStopSimulator() {
         // inicializa a interface gráfica na EDT
-        EventQueue.invokeLater(() ->
-                window = new BusStopWindow("BUS STOP", buttonListenerPlayPause, buttonListenerStop)
-        );
+        EventQueue.invokeLater(() -> {
+            window = new BusStopWindow("BUS STOP", buttonListenerPlayPause, buttonListenerStop);
+        });
     }
 
     private void startSimulation() {
@@ -75,12 +78,40 @@ public class BusStopSimulator {
                 try {
                     busCreationSemaphore.acquire();
                     EventQueue.invokeLater(this::createBus);
-                    // delay para a criação dos ônibus (4000ms)
+                    // delay para a criação dos ônibus
                     sleep(4000);
+                    /*if (window.getSemaphoreState() == 2) {
+                        sleep(4500);
+                    } else {
+                        sleep(4000);
+                    }*/
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                 } finally {
                     busCreationSemaphore.release();
+                }
+            }
+        }).start();
+    }
+
+    private void startPersonCreation() {
+        new Thread(() -> {
+            while (running) {
+                lock.lock();
+                try {
+                    while (paused) {
+                        simulationCondition.await();
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    lock.unlock();
+                }
+                try {
+                    EventQueue.invokeLater(this::createPerson);
+                    sleep(1200);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
                 }
             }
         }).start();
@@ -109,6 +140,38 @@ public class BusStopSimulator {
         moveBus(bus);
     }
 
+    private void createPerson() {
+        new Thread(() -> {
+            Person person;
+            lock.lock();
+            try {
+                if (paused) {
+                    return;
+                }
+                person = window.createPerson();
+                personList.add(person);
+                System.out.println("Pessoa foi criada!");
+                person.setWalking();
+            } finally {
+                lock.unlock();
+            }
+
+            while (!person.checkBusStop()) { // movimentação da pessoa até o ponto de ônibus
+                try {
+                    sleep(200);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            lock.lock();
+            try {
+                waitingQueue.add(person); // quando a pessoa chega ao ponto, adiciona à fila de espera
+            } finally {
+                lock.unlock();
+            }
+        }).start();
+    }
+
     private void moveBus(Bus bus) {
         new Thread(() -> {
             // inicia a animação; assume que startBus() inicia o timer interno
@@ -116,6 +179,16 @@ public class BusStopSimulator {
             // o laço de movimentação não verifica mais a condição de pausa.
             // assim, os ônibus já na tela continuam se movendo normalmente, independentemente do estado "paused".
             while (!bus.reachedEndOfScreen()) {
+                // Verifica o estado do semáforo antes de avançar
+                if (window.getSemaphoreState() == 2) { // 2 = vermelho
+                    do {
+                        try {
+                            sleep(500); // Espera enquanto estiver vermelho
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                        }
+                    } while (window.getSemaphoreState() == 2);
+                }
                 bus.stepBus();
                 try {
                     sleep(1);
