@@ -80,11 +80,6 @@ public class BusStopSimulator {
                     EventQueue.invokeLater(this::createBus);
                     // delay para a criação dos ônibus
                     sleep(4000);
-                    /*if (window.getSemaphoreState() == 2) {
-                        sleep(4500);
-                    } else {
-                        sleep(4000);
-                    }*/
                 } catch (InterruptedException ex) {
                     Thread.currentThread().interrupt();
                 } finally {
@@ -180,7 +175,7 @@ public class BusStopSimulator {
             // assim, os ônibus já na tela continuam se movendo normalmente, independentemente do estado "paused".
             while (!bus.reachedEndOfScreen()) {
                 // Verifica o estado do semáforo antes de avançar
-                if (window.getSemaphoreState() == 2) { // 2 = vermelho
+                if (window.getSemaphoreState() == 2 && bus.checkBusIsOnSemaphore()) { // 2 = vermelho
                     do {
                         try {
                             sleep(500); // Espera enquanto estiver vermelho
@@ -188,6 +183,35 @@ public class BusStopSimulator {
                             Thread.currentThread().interrupt();
                         }
                     } while (window.getSemaphoreState() == 2);
+                }
+                if (bus.checkBusStop() && bus.getStopped() == 0) {
+                    lock.lock();
+                    try {
+                        if (!waitingQueue.isEmpty()) {
+                            bus.setStopped();
+                            System.out.println("Ônibus parou no ponto de ônibus.");
+                            while (bus.getPassengers().size() < bus.getDefLimitPassengers() && !waitingQueue.isEmpty()) {
+                                Person person = waitingQueue.remove(0);
+                                bus.addPassenger(person);
+                                person.hasBoarded();
+                                window.removePerson(person);
+                                System.out.println("Uma pessoa embarcou. Passageiros a bordo: " + bus.getPassengers().size());
+                                try {
+                                    sleep(500);
+                                } catch (InterruptedException ex) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            }
+                            System.out.println("Ônibus vai embora.");
+                        }
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+                // Só continua se o ônibus estiver parado e todos os passageiros já tiverem embarcado.
+                if (bus.getPassengers().size() >= bus.getDefLimitPassengers() || waitingQueue.isEmpty()) {
+                    // Quando o ônibus estiver cheio ou não houver mais passageiros esperando, ele sai.
+                    bus.setStopped(); // Ônibus continua.
                 }
                 bus.stepBus();
                 try {
